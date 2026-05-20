@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         API接口调试助手
+// @name         API接口调试助手[豆包]
 // @namespace    http://tampermonkey.net/
-// @version      1.5.3
+// @version      1.5.6
 // @description  自动记录网页API请求，支持重发、调试、导出，按网站隔离请求数据，支持表格自定义字段
 // @author       You
 // @match        *://*/*
@@ -301,6 +301,7 @@
         if (!container) return;
         const mode = config.responseViewMode;
         const response = request.response;
+        const rawResponse = request.rawResponse;
         let content = '';
         if (response === undefined || response === null) {
             content = '<span style="color: #969696;">无响应数据</span>';
@@ -318,15 +319,21 @@
                 content = `<span style="color: #d9534f;">无法找到数组数据，请检查数据路径是否正确。当前路径: ${config.tableDataPath}</span>`;
             }
         } else {
-            content = `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word;">${escapeHtml(JSON.stringify(response, null, 2))}</pre>`;
+            // 原始数据模式，展示服务器返回的原始文本
+            if (rawResponse !== undefined) {
+                content = `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; color: #d4d4d4;">${escapeHtml(rawResponse)}</pre>`;
+            } else {
+                // 兼容旧数据，如果没有原始文本，就用格式化的
+                content = `<pre style="margin: 0; white-space: pre-wrap; word-wrap: break-word; color: #d4d4d4;">${escapeHtml(JSON.stringify(response, null, 2))}</pre>`;
+            }
         }
         container.innerHTML = `
             <div style="margin-bottom: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
                 <label style="color: #969696;">展示模式:</label>
                 <select id="response-view-mode" style="padding: 2px 6px; background: #3c3c3c; border: 1px solid #555; color: #d4d4d4; border-radius: 3px;">
-                    <option value="json">JSON格式化</option>
+                    <option value="json" ${mode === 'json' ? 'selected' : ''}>JSON格式化</option>
                     <option value="table" ${mode === 'table' ? 'selected' : ''}>表格展示</option>
-                    <option value="raw">原始数据</option>
+                    <option value="raw" ${mode === 'raw' ? 'selected' : ''}>原始数据</option>
                 </select>
                 <label style="color: #969696; margin-left: 8px;">数据路径:</label>
                 <input type="text" id="table-data-path" placeholder="如: data.list" value="${config.tableDataPath}" style="padding: 2px 6px; background: #3c3c3c; border: 1px solid #555; color: #d4d4d4; border-radius: 3px; width: 120px;">
@@ -489,6 +496,18 @@
                     }
                 }
             };
+        }
+        
+        // 修复：如果是表格模式，重新给输入框设置焦点，避免输入的时候丢焦点
+        if (mode === 'table') {
+            setTimeout(() => {
+                const input = document.getElementById('table-data-path');
+                if (input) {
+                    input.focus();
+                    // 把光标放到最后，这样可以继续输入
+                    input.setSelectionRange(input.value.length, input.value.length);
+                }
+            }, 0);
         }
     }
     // 渲染头信息
@@ -1312,9 +1331,11 @@
             xhr.addEventListener('load', function() {
                 const duration = Date.now() - startTime;
                 
-                let response = xhr.responseText;
+                // 保存原始响应文本
+                const rawResponse = xhr.responseText;
+                let response = rawResponse;
                 try {
-                    response = JSON.parse(response);
+                    response = JSON.parse(rawResponse);
                 } catch (e) {
                     // 不是JSON
                 }
@@ -1339,6 +1360,7 @@
                     responseHeaders: responseHeaders,
                     requestBody: body,
                     response: response,
+                    rawResponse: rawResponse, // 保存原始响应文本
                     duration: duration,
                     timestamp: Date.now()
                 };
@@ -1388,9 +1410,11 @@
                     const clone = response.clone();
                     
                     clone.text().then(text => {
-                        let responseData = text;
+                        // 保存原始响应文本
+                        const rawResponse = text;
+                        let responseData = rawResponse;
                         try {
-                            responseData = JSON.parse(text);
+                            responseData = JSON.parse(rawResponse);
                         } catch (e) {
                             // 不是JSON
                         }
@@ -1407,6 +1431,7 @@
                             responseHeaders: responseHeaders,
                             requestBody: body,
                             response: responseData,
+                            rawResponse: rawResponse, // 保存原始响应文本
                             duration: duration,
                             timestamp: Date.now()
                         };
