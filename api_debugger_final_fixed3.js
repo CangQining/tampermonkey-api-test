@@ -424,7 +424,7 @@
                     const checked = true;
                     fieldsHtml += `
                         <label style="display: block; margin: 8px 0; color: #d4d4d4; cursor: pointer;">
-                            <input type="checkbox" class="field-checkbox" value="${escapeHtml(field)}" ${checked}>
+                            <input type="checkbox" class="field-checkbox" value="${escapeHtml(field)}" checked>
                             ${escapeHtml(field)}
                         </label>
                     `;
@@ -596,7 +596,14 @@
         if (!methodEl || !urlEl || !headersEl || !bodyEl) return;
         
         try {
-            const headers = JSON.parse(headersEl.value);
+            let headers;
+            try {
+                headers = JSON.parse(headersEl.value);
+            } catch (e) {
+                if (resultDiv) resultDiv.style.display = 'block';
+                if (resultContent) resultContent.innerHTML = `<span style="color: #d9534f;">请求头格式错误，请检查JSON格式: ${escapeHtml(e.message)}</span>`;
+                return;
+            }
             let body = bodyEl.value;
             
             // 如果是JSON格式的body，尝试解析
@@ -731,9 +738,17 @@
     }
     // 复制到剪贴板
     function copyToClipboard(text) {
+        // 优先使用现代 Clipboard API
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).catch(() => {});
+            return true;
+        }
+        // 降级：使用 execCommand（已废弃但兼容旧环境）
         try {
             const textarea = document.createElement('textarea');
             textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
             document.body.appendChild(textarea);
             textarea.select();
             document.execCommand('copy');
@@ -752,8 +767,26 @@
                 timeout: 2000
             });
         } catch (e) {
-            // 降级处理
-            alert(text);
+            // 降级处理：在页面内显示 toast，不阻塞页面
+            const toast = document.createElement('div');
+            toast.textContent = text;
+            toast.style.cssText = `
+                position: fixed;
+                bottom: 80px;
+                right: 20px;
+                background: #333;
+                color: #fff;
+                padding: 8px 16px;
+                border-radius: 4px;
+                z-index: 10000000;
+                font-size: 13px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+                pointer-events: none;
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                if (toast.parentNode) toast.parentNode.removeChild(toast);
+            }, 2000);
         }
     }
     // 筛选请求
@@ -878,7 +911,7 @@
                 a.href = url;
                 a.download = `api-debugger-export-${Date.now()}.json`;
                 a.click();
-                URL.revokeObjectURL(url);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
                 showNotification('导出成功');
             };
         }
@@ -978,6 +1011,7 @@
                     top: 0;
                     left: 0;
                     right: 0;
+                    bottom: 0;
                     background: rgba(0,0,0,0.5);
                     z-index: 999999;
                 `;
@@ -1024,6 +1058,10 @@
                         const oldPanel = document.getElementById('api-debugger-panel');
                         if (oldPanel) {
                             document.body.removeChild(oldPanel);
+                        }
+                        const oldBtn = document.getElementById('api-debugger-float-btn');
+                        if (oldBtn) {
+                            document.body.removeChild(oldBtn);
                         }
                         createPanel();
                         
@@ -1387,6 +1425,10 @@
                 url = input.url;
                 headers = {};
                 input.headers.forEach((v, k) => headers[k] = v);
+                // 读取 Request body（克隆避免消耗原始流）
+                try {
+                    body = input.clone().body ? input.clone().text().then(t => t).catch(() => null) : null;
+                } catch(e) {}
             }
             if (init) {
                 method = init.method || method;
