@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         API接口调试助手[豆包]
 // @namespace    http://tampermonkey.net/
-// @version      1.6.0
+// @version      1.6.1
 // @description  自动记录网页API请求，支持重发、调试、导出，按网站隔离请求数据，支持表格自定义字段
 // @author       You
 // @match        *://*/*
@@ -55,7 +55,7 @@
     // 保存数据
     function saveData() {
         if (!config.autoSave) return;
-        
+
         try {
             // 限制保存的请求数量
             if (config.maxRequests > 0 && requests.length > config.maxRequests) {
@@ -63,7 +63,7 @@
                 // 重新应用当前搜索过滤，保留用户的筛选状态
                 filterRequests();
             }
-            
+
             // 保存的时候，不保存customTableFields，因为用户说不需要自动保存
             const { customTableFields, ...saveConfig } = config;
             GM_setValue(STORAGE_KEY, requests);
@@ -108,7 +108,7 @@
             return `<span style="color: #969696;">null</span>`;
         }
         if (typeof obj !== 'object') {
-            const color = typeof obj === 'string' ? '#ce9178' : 
+            const color = typeof obj === 'string' ? '#ce9178' :
                          (typeof obj === 'number' || typeof obj === 'boolean' ? '#b5cea8' : '#d4d4d4');
             // 使用 escapeAttr 而非 escapeHtml，避免 & 等字符被二次转义显示为 &amp;
             return `<span style="color: ${color}">${escapeAttr(JSON.stringify(obj))}</span>`;
@@ -127,12 +127,12 @@
             html += `<span class="json-toggle" data-target="${id}" style="cursor: pointer; color: #569cd6; user-select: none;">▼</span> {`;
         }
         html += `<div id="${id}" class="json-children">`;
-        
+
         items.forEach(([key, value], index) => {
             const comma = index < items.length - 1 ? ',' : '';
             const keyColor = '#9cdcfe';
             const keyHtml = isArray ? '' : `<span style="color: ${keyColor}">"${escapeAttr(key)}"</span>: `;
-            
+
             html += `<div style="padding-left: 16px;">${keyHtml}${formatJSONCollapsible(value, level + 1)}${comma}</div>`;
         });
         html += `</div>`;
@@ -182,7 +182,7 @@
         if (fieldList.length === 0) {
             return '<span style="color: #969696;">无可展示字段</span>';
         }
-        
+
         let html = '<table style="width: 100%; border-collapse: collapse; font-size: 12px;">';
         html += '<thead><tr style="background: #2d2d30;">';
         fieldList.forEach(field => {
@@ -209,6 +209,43 @@
         html += '</tbody></table>';
         return html;
     }
+    // 导出表格数据为 Excel（CSV UTF-8 BOM，Excel 可直接识别中文）
+    function exportTableToExcel(data, fields) {
+        if (!data || data.length === 0 || !fields || fields.length === 0) {
+            showNotification('没有数据可导出');
+            return;
+        }
+        // 将单元格值转为 CSV 安全字符串
+        function csvCell(val) {
+            if (val === undefined || val === null) return '';
+            let str = typeof val === 'object' ? JSON.stringify(val) : String(val);
+            // 含逗号、双引号、换行时用双引号包裹，内部双引号转义为两个双引号
+            if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+                str = '"' + str.replace(/"/g, '""') + '"';
+            }
+            return str;
+        }
+        const rows = [];
+        // 表头
+        rows.push(fields.map(csvCell).join(','));
+        // 数据行
+        data.forEach(item => {
+            rows.push(fields.map(field => csvCell(item ? item[field] : '')).join(','));
+        });
+        // UTF-8 BOM + CSV 内容
+        const csvContent = '\uFEFF' + rows.join('\r\n');
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        a.href = url;
+        a.download = `api_export_${ts}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        showNotification(`已导出 ${data.length} 行 × ${fields.length} 列`);
+    }
     // 更新浮动按钮的请求数量显示，99个以后显示99+
     function updateFloatButtonCount() {
         const btn = document.getElementById('api-debugger-float-btn');
@@ -226,7 +263,7 @@
         filteredRequests.slice().reverse().forEach((req, index) => {
             const tr = document.createElement('tr');
             const isSelected = config.selectedRequest && config.selectedRequest.id === req.id;
-            
+
             tr.style.background = isSelected ? '#094771' : 'transparent';
             tr.style.cursor = 'pointer';
             tr.onclick = () => selectRequest(req);
@@ -291,7 +328,7 @@
         renderHeadersContent(request);
         // 渲染重发界面
         renderReplayContent(request);
-        
+
         // 绑定JSON折叠事件
         setTimeout(bindJsonToggleEvents, 0);
     }
@@ -303,7 +340,7 @@
         content += `<div><strong>URL:</strong> ${escapeHtml(request.url)}</div>`;
         content += `<div><strong>方法:</strong> ${request.method}</div>`;
         content += `<div><strong>时间:</strong> ${new Date(request.timestamp).toLocaleString()}</div>`;
-        
+
         if (request.requestBody) {
             content += `<div style="margin-top: 12px;"><strong>请求体:</strong></div>`;
             content += `<div style="padding: 8px; background: #252526; border-radius: 4px; margin-top: 4px;">`;
@@ -371,6 +408,7 @@
                     '<input type="text" id="table-data-path" placeholder="如: data.list" style="padding: 2px 6px; background: #3c3c3c; border: 1px solid #555; color: #d4d4d4; border-radius: 3px; width: 120px;">' +
                     '<button id="custom-table-fields-btn" style="padding: 2px 8px; background: #3c3c3c; border: none; color: #d4d4d4; border-radius: 3px; cursor: pointer; font-size: 12px;">自定义字段</button>' +
                     '<button id="copy-response-btn" style="padding: 2px 8px; background: #3c3c3c; border: none; color: #d4d4d4; border-radius: 3px; cursor: pointer; font-size: 12px;">复制</button>' +
+                    '<button id="download-excel-btn" style="padding: 2px 8px; background: #217346; border: none; color: #fff; border-radius: 3px; cursor: pointer; font-size: 12px;">⬇ 下载 Excel</button>' +
                 '</div>' +
                 '<div id="response-body" style="padding: 8px; background: #252526; border-radius: 4px;"></div>';
 
@@ -434,7 +472,7 @@
                     }
                 });
                 const fieldList = Array.from(allFields);
-                
+
                 // 创建对话框
                 const dialog = document.createElement('div');
                 dialog.style.cssText = `
@@ -487,7 +525,7 @@
                 `;
                 document.body.appendChild(mask);
                 document.body.appendChild(dialog);
-                
+
                 // 绑定事件
                 const cancelBtn = dialog.querySelector('#fields-cancel');
                 if (cancelBtn) {
@@ -531,6 +569,84 @@
                 }
             };
         }
+        // 下载 Excel 按钮（每次重新绑，保证引用最新 request）
+        const downloadExcelBtn = document.getElementById('download-excel-btn');
+        if (downloadExcelBtn) {
+            downloadExcelBtn.onclick = () => {
+                if (!config.selectedRequest) {
+                    showNotification('请先选择一个请求');
+                    return;
+                }
+                const response = config.selectedRequest.response;
+                if (!response) {
+                    showNotification('没有响应数据');
+                    return;
+                }
+                // 获取表格数据
+                let tableData = getValueByPath(response, config.tableDataPath);
+                if (!Array.isArray(tableData)) tableData = Array.isArray(response) ? response : null;
+                if (!tableData || tableData.length === 0) {
+                    showNotification('没有找到可导出的数组数据，请检查数据路径');
+                    return;
+                }
+                // 收集所有字段
+                const allFields = new Set();
+                tableData.forEach(item => {
+                    if (typeof item === 'object' && item) Object.keys(item).forEach(k => allFields.add(k));
+                });
+                const fieldList = Array.from(allFields);
+                // 当前已勾选字段（若无自定义则全选）
+                const currentFields = (config.customTableFields && config.customTableFields.length > 0)
+                    ? config.customTableFields.filter(f => allFields.has(f))
+                    : fieldList;
+                // 弹出字段勾选对话框
+                const mask = document.createElement('div');
+                mask.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:999999;';
+                const dialog = document.createElement('div');
+                dialog.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#252526;border:1px solid #3c3c3c;border-radius:6px;padding:20px;z-index:1000000;min-width:300px;max-height:80vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.5);';
+                let fieldsHtml = '';
+                fieldList.forEach(field => {
+                    const checked = currentFields.includes(field) ? 'checked' : '';
+                    fieldsHtml += `<label style="display:block;margin:8px 0;color:#d4d4d4;cursor:pointer;"><input type="checkbox" class="excel-field-checkbox" value="${escapeHtml(field)}" ${checked}> ${escapeHtml(field)}</label>`;
+                });
+                dialog.innerHTML = `
+                    <h3 style="margin:0 0 12px 0;color:#217346;">⬇ 下载 Excel — 选择字段</h3>
+                    <div style="margin-bottom:4px;display:flex;gap:8px;">
+                        <button id="excel-select-all" style="padding:2px 10px;background:#3c3c3c;border:none;color:#d4d4d4;border-radius:3px;cursor:pointer;font-size:12px;">全选</button>
+                        <button id="excel-deselect-all" style="padding:2px 10px;background:#3c3c3c;border:none;color:#d4d4d4;border-radius:3px;cursor:pointer;font-size:12px;">全不选</button>
+                    </div>
+                    <div style="margin:10px 0 16px 0;">${fieldsHtml}</div>
+                    <div style="display:flex;gap:8px;justify-content:flex-end;">
+                        <button id="excel-cancel" style="padding:6px 16px;background:#3c3c3c;border:none;color:#d4d4d4;border-radius:3px;cursor:pointer;">取消</button>
+                        <button id="excel-download" style="padding:6px 16px;background:#217346;border:none;color:white;border-radius:3px;cursor:pointer;">下载</button>
+                    </div>
+                `;
+                document.body.appendChild(mask);
+                document.body.appendChild(dialog);
+
+                const closeDialog = () => {
+                    document.body.removeChild(dialog);
+                    document.body.removeChild(mask);
+                };
+                dialog.querySelector('#excel-cancel').onclick = closeDialog;
+                mask.onclick = closeDialog;
+                dialog.querySelector('#excel-select-all').onclick = () => {
+                    dialog.querySelectorAll('.excel-field-checkbox').forEach(cb => cb.checked = true);
+                };
+                dialog.querySelector('#excel-deselect-all').onclick = () => {
+                    dialog.querySelectorAll('.excel-field-checkbox').forEach(cb => cb.checked = false);
+                };
+                dialog.querySelector('#excel-download').onclick = () => {
+                    const selectedFields = Array.from(dialog.querySelectorAll('.excel-field-checkbox:checked')).map(cb => cb.value);
+                    if (selectedFields.length === 0) {
+                        showNotification('请至少勾选一个字段');
+                        return;
+                    }
+                    closeDialog();
+                    exportTableToExcel(tableData, selectedFields);
+                };
+            };
+        }
 
         // 渲染内容区
         renderResponseBody(request);
@@ -540,7 +656,7 @@
         const container = document.getElementById('headers-content');
         if (!container) return;
         let html = '';
-        
+
         if (request.requestHeaders) {
             html += `<div style="margin-bottom: 16px;">
                 <h4 style="margin: 0 0 8px 0; color: #9cdcfe;">请求头</h4>
@@ -619,7 +735,7 @@
         const resultDiv = document.getElementById('replay-result');
         const resultContent = document.getElementById('replay-result-content');
         if (!methodEl || !urlEl || !headersEl || !bodyEl) return;
-        
+
         try {
             let headers;
             try {
@@ -630,7 +746,7 @@
                 return;
             }
             let body = bodyEl.value;
-            
+
             // 如果是JSON格式的body，尝试解析
             try {
                 body = JSON.parse(body);
@@ -641,7 +757,7 @@
             if (resultContent) resultContent.innerHTML = '<span style="color: #969696;">请求中...</span>';
             // 使用GM_xmlhttpRequest发送请求
             const startTime = Date.now();
-            
+
             GM_xmlhttpRequest({
                 method: methodEl.value,
                 url: urlEl.value,
@@ -650,7 +766,7 @@
                 timeout: 30000,
                 onload: function(response) {
                     const duration = Date.now() - startTime;
-                    
+
                     let responseData = response.responseText;
                     try {
                         responseData = JSON.parse(response.responseText);
@@ -667,7 +783,7 @@
                             </div>
                             ${formatJSONCollapsible(responseData)}
                         `;
-                        
+
                         setTimeout(bindJsonToggleEvents, 0);
                     }
                 },
@@ -698,7 +814,7 @@
         const resultDiv = document.getElementById('custom-result');
         const resultContent = document.getElementById('custom-result-content');
         if (!methodEl || !urlEl || !headersEl || !bodyEl) return;
-        
+
         if (!urlEl.value) {
             if (resultDiv) resultDiv.style.display = 'block';
             if (resultContent) resultContent.innerHTML = `<span style="color: #d9534f;">请输入请求URL</span>`;
@@ -709,7 +825,7 @@
             if (headersEl.value.trim()) {
                 headers = JSON.parse(headersEl.value);
             }
-            
+
             let body = bodyEl.value;
             // 如果是JSON格式的body，尝试解析
             try {
@@ -723,7 +839,7 @@
             if (resultContent) resultContent.innerHTML = '<span style="color: #969696;">请求中...</span>';
             // 使用GM_xmlhttpRequest发送请求
             const startTime = Date.now();
-            
+
             GM_xmlhttpRequest({
                 method: methodEl.value,
                 url: urlEl.value,
@@ -732,7 +848,7 @@
                 timeout: 30000,
                 onload: function(response) {
                     const duration = Date.now() - startTime;
-                    
+
                     let responseData = response.responseText;
                     try {
                         responseData = JSON.parse(response.responseText);
@@ -749,7 +865,7 @@
                             </div>
                             ${formatJSONCollapsible(responseData)}
                         `;
-                        
+
                         setTimeout(bindJsonToggleEvents, 0);
                     }
                 },
@@ -839,7 +955,7 @@
                 const methodMatch = req.method.toLowerCase().includes(filterText);
                 const bodyMatch = req.requestBody && JSON.stringify(req.requestBody).toLowerCase().includes(filterText);
                 const responseMatch = req.response && JSON.stringify(req.response).toLowerCase().includes(filterText);
-                
+
                 return urlMatch || methodMatch || bodyMatch || responseMatch;
             }
             return true;
@@ -872,7 +988,7 @@
     // 绑定面板事件
     function bindPanelEvents(panel) {
         if (!panel) return;
-        
+
         // 标签页点击
         panel.querySelectorAll('.tab').forEach(tab => {
             if (tab) {
@@ -962,7 +1078,7 @@
                 input.onchange = function(e) {
                     const file = e.target.files[0];
                     if (!file) return;
-                    
+
                     const reader = new FileReader();
                     reader.onload = function(e) {
                         try {
@@ -1080,18 +1196,18 @@
                         let maxReq = parseInt(maxReqInput?.value) || 0;
                         if (maxReq < 0) maxReq = 0;
                         config.maxRequests = maxReq;
-                        
+
                         // 面板位置
                         const positionInput = document.getElementById('settings-panel-position');
                         if (positionInput) config.panelPosition = positionInput.value;
-                        
+
                         // 面板高度
                         const heightInput = document.getElementById('settings-panel-height');
                         let height = parseInt(heightInput?.value) || 50;
                         if (height < 10) height = 10;
                         if (height > 80) height = 80;
                         config.panelHeight = height;
-                        
+
                         // 面板宽度
                         const widthInput = document.getElementById('settings-panel-width');
                         let width = parseInt(widthInput?.value) || 50;
@@ -1110,9 +1226,9 @@
                         let sizeKB = parseInt(sizeInput?.value) || 512;
                         if (sizeKB < 0) sizeKB = 0;
                         config.rawResponseSizeLimit = sizeKB === 0 ? Infinity : sizeKB * 1024;
-                        
+
                         saveData();
-                        
+
                         // 保存后重新创建面板以应用新的位置配置
                         const oldPanel = document.getElementById('api-debugger-panel');
                         if (oldPanel) {
@@ -1123,7 +1239,7 @@
                             document.body.removeChild(oldBtn);
                         }
                         createPanel();
-                        
+
                         document.body.removeChild(dialog);
                         document.body.removeChild(mask);
                         showNotification('设置已保存');
@@ -1186,7 +1302,7 @@
     function createPanel() {
         const panel = document.createElement('div');
         panel.id = 'api-debugger-panel';
-        
+
         let panelStyle, resizerStyle, resizerTitle;
         if (config.panelPosition === 'bottom') {
             panelStyle = `
@@ -1226,7 +1342,7 @@
             resizerTitle = '👈 这里！按住这里拖动调整面板宽度！';
         }
         panel.style.cssText = panelStyle;
-        
+
         panel.innerHTML = `
             <!-- 可拖动的分隔条 -->
             <div id="api-resizer" style="${resizerStyle}" title="${resizerTitle}">
@@ -1236,7 +1352,7 @@
                     <div style="width: 4px; height: 4px; background: rgba(255,255,255,0.6); border-radius: 50%;"></div>
                 </div>
             </div>
-            
+
             <!-- 头部 -->
             <div class="panel-header" style="padding: 8px 12px; background: #252526; border-bottom: 1px solid #3c3c3c; display: flex; align-items: center; gap: 8px;">
                 <div style="font-weight: bold; color: #007acc; font-size: 14px;">API接口调试助手</div>
@@ -1255,7 +1371,7 @@
                 <button id="api-import-btn" style="padding: 4px 12px; background: #5cb85c; border: none; color: white; border-radius: 3px; cursor: pointer;">导入</button>
                 <button id="api-toggle-btn" style="padding: 4px 8px; background: #3c3c3c; border: none; color: #d4d4d4; border-radius: 3px; cursor: pointer;">×</button>
             </div>
-            
+
             <!-- 主体 -->
             <div class="panel-body" style="flex: 1; display: flex; overflow: hidden;">
                 <!-- 请求列表 -->
@@ -1274,7 +1390,7 @@
                         </tbody>
                     </table>
                 </div>
-                
+
                 <!-- 请求详情 -->
                 <div class="request-detail" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
                     <!-- 标签页 -->
@@ -1285,7 +1401,7 @@
                         <div class="tab" data-tab="replay" style="padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: #969696;">重发</div>
                         <div class="tab" data-tab="custom" style="padding: 8px 16px; cursor: pointer; border-bottom: 2px solid transparent; color: #969696;">自定义请求</div>
                     </div>
-                    
+
                     <!-- 标签页内容 -->
                     <div class="tab-content" style="flex: 1; overflow-y: auto; padding: 12px;">
                         <div id="tab-request" class="tab-panel">
@@ -1346,7 +1462,7 @@
         }
         // 创建浮动按钮
         createFloatButton();
-        
+
         // 确保按钮能正确显示
         setTimeout(() => {
             const btn = document.getElementById('api-debugger-float-btn');
@@ -1495,7 +1611,7 @@
         const originalFetch = window.fetch;
         window.fetch = function(input, init) {
             const startTime = Date.now();
-            
+
             let method = 'GET';
             let url = input;
             let body = null;
